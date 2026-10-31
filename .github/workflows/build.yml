@@ -93,7 +93,7 @@ jobs:
           scripts/fetch-release.sh "$VERSION"
           echo "java=$(cat upstream/JAVA_VERSION)" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v3
 
       # ---------- Smoke test (amd64) before anything is published ----------
