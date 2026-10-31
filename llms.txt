@@ -1,0 +1,28 @@
+# upstreamyard/fineract
+
+> Fineract Docker image: multi-arch (amd64, arm64), cosign-signed container images of Apache Fineract, the open-source core banking API server, with a version tag for every Apache release (1.16.1, 1.16, latest) built from the signed Apache binary release, and a matching Fineract Helm chart for Kubernetes. Secure by default: FINERACT_ADMIN_PASSWORD replaces the default mifos/password login on the first start, every container generates its own TLS certificate instead of Fineract's public built-in key, non-root UID 10001, healthcheck. PostgreSQL and MariaDB drivers included; document uploads stored in /var/lib/fineract. Community-maintained by upstreamyard; not an official Apache image. Pull `upstreamyard/fineract:<version>` or `ghcr.io/upstreamyard/fineract:<version>`.
+
+Key facts: two databases must exist first, fineract_tenants (FINERACT_HIKARI_JDBC_URL, FINERACT_HIKARI_USERNAME/PASSWORD) and fineract_default (FINERACT_DEFAULT_TENANTDB_HOSTNAME/NAME/UID/PWD). Set FINERACT_DEFAULT_TENANTDB_MASTER_PASSWORD before the first start and never change it. HTTPS on 8443 by default; FINERACT_SERVER_SSL_CERTIFICATE and FINERACT_SERVER_SSL_CERTIFICATE_PRIVATE_KEY serve PEM files (e.g. a cert-manager Secret) and reload them on renewal; FINERACT_SERVER_SSL_ENABLED=false gives HTTP on 8080. API under /fineract-provider/api/v1 with header Fineract-Platform-TenantId: default. Probes /fineract-provider/actuator/health/liveness and /readiness, metrics /fineract-provider/actuator/prometheus. For several instances: SPRING_PROFILES_ACTIVE=liquibase-only runs migrations and exits; FINERACT_LIQUIBASE_ENABLED=false on servers; FINERACT_MODE_READ_ENABLED/WRITE_ENABLED/BATCH_MANAGER_ENABLED/BATCH_WORKER_ENABLED select the instance type. Memory limit at least 2 GiB. Every FINERACT_* variable has a _FILE variant. Jars in /app/plugins (e.g. the MySQL driver) are loaded.
+
+## Docs
+
+- [README](https://raw.githubusercontent.com/upstreamyard/fineract/main/README.md): quick start, environment variables, databases, HTTPS, admin password, scaling and instance types, Kubernetes, migration from apache/fineract, FAQ
+- [AGENTS.md](https://raw.githubusercontent.com/upstreamyard/fineract/main/AGENTS.md): image facts table, deployment rules, repository conventions
+
+## Examples
+
+- [docker-compose.yml](https://raw.githubusercontent.com/upstreamyard/fineract/main/docker-compose.yml): Fineract with PostgreSQL 18
+- [examples/mariadb/docker-compose.yml](https://raw.githubusercontent.com/upstreamyard/fineract/main/examples/mariadb/docker-compose.yml): Fineract with MariaDB 11.8
+- [Helm chart](https://raw.githubusercontent.com/upstreamyard/helm-charts/main/charts/fineract/README.md): Fineract on Kubernetes; `helm repo add upstreamyard https://upstreamyard.github.io/helm-charts`
+
+## Fineract reference
+
+- [Fineract documentation](https://fineract.apache.org/docs/stable/): configuration properties, instance types, security, API
+- [Mifos X web app](https://github.com/openMF/web-app): separate web UI for Fineract
+
+## Optional
+
+- [Build workflow](https://raw.githubusercontent.com/upstreamyard/fineract/main/.github/workflows/build.yml): how images are built, tested, signed and published
+- [Dockerfile](https://raw.githubusercontent.com/upstreamyard/fineract/main/Dockerfile)
+- [Entrypoint](https://raw.githubusercontent.com/upstreamyard/fineract/main/docker-entrypoint.sh)
+- [Smoke test](https://raw.githubusercontent.com/upstreamyard/fineract/main/scripts/smoke-test.sh)

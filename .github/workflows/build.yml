@@ -1,0 +1,206 @@
+name: Build & publish
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Daily: pick up new Fineract releases automatically.
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Fineract version to build (e.g. 1.16.1). Empty = the current release."
+        required: false
+        default: ""
+      force:
+        description: "Rebuild even if the version is already published"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.version }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: fineract
+  PLATFORMS: linux/amd64,linux/arm64
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      minor: ${{ steps.v.outputs.minor }}
+      latest: ${{ steps.v.outputs.latest }}
+      build: ${{ steps.v.outputs.build }}
+    steps:
+      - id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          FORCE: ${{ inputs.force }}
+          EVENT: ${{ github.event_name }}
+          GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/fineract
+        run: |
+          set -euo pipefail
+          # Apache's download server lists exactly the current release. A git tag can
+          # exist before the release vote has passed, so tags are not used.
+          current=$(curl -fsSL https://downloads.apache.org/fineract/ \
+            | grep -oE 'href="[0-9]+\.[0-9]+\.[0-9]+/"' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -1)
+          [ -n "$current" ] || { echo "No release found on downloads.apache.org"; exit 1; }
+          version=${INPUT_VERSION:-$current}
+          echo "Current release: $current | building: $version"
+
+          build=true
+          if [ "$EVENT" = "schedule" ] || { [ "$EVENT" = "workflow_dispatch" ] && [ "$FORCE" != "true" ]; }; then
+            if docker buildx imagetools inspect "${GHCR_IMAGE,,}:$version" >/dev/null 2>&1; then
+              echo "$version already published, skipping."
+              build=false
+            fi
+          fi
+          {
+            echo "version=$version"
+            echo "minor=$(echo "$version" | cut -d. -f1-2)"
+            # <major>.<minor> and latest only move to the current release.
+            echo "latest=$([ "$version" = "$current" ] && echo true || echo false)"
+            echo "build=$build"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # push to GHCR
+      id-token: write   # keyless cosign signing
+    env:
+      VERSION: ${{ needs.resolve.outputs.version }}
+      MINOR: ${{ needs.resolve.outputs.minor }}
+      LATEST: ${{ needs.resolve.outputs.latest }}
+      PUBLISH: ${{ github.event_name != 'pull_request' }}
+      DOCKERHUB_ENABLED: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+      QUAY_ENABLED: ${{ secrets.QUAY_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download and verify Fineract ${{ env.VERSION }}
+        id: release
+        run: |
+          scripts/fetch-release.sh "$VERSION"
+          echo "java=$(cat upstream/JAVA_VERSION)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # ---------- Smoke test (amd64) before anything is published ----------
+      - name: Build test image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: fineract:smoke
+          build-args: |
+            FINERACT_VERSION=${{ env.VERSION }}
+            JAVA_VERSION=${{ steps.release.outputs.java }}
+          cache-from: type=gha,scope=fineract
+          cache-to: type=gha,mode=max,scope=fineract
+
+      - name: Smoke test (PostgreSQL, MariaDB, admin password, instance types, read-only rootfs)
+        run: scripts/smoke-test.sh fineract:smoke
+
+      # ---------- Publish ----------
+      - name: Log in to Docker Hub
+        if: env.PUBLISH == 'true' && env.DOCKERHUB_ENABLED == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GHCR
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Log in to Quay.io
+        if: env.PUBLISH == 'true' && env.QUAY_ENABLED == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: quay.io
+          username: ${{ vars.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_TOKEN }}
+
+      - name: Image names
+        id: images
+        env:
+          OWNER: ${{ github.repository_owner }}
+          DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || github.repository_owner }}
+          QUAY_NAMESPACE: ${{ vars.QUAY_NAMESPACE || github.repository_owner }}
+        run: |
+          {
+            echo "list<<EOF"
+            echo "ghcr.io/${OWNER,,}/$IMAGE_NAME"
+            [ "$DOCKERHUB_ENABLED" = "true" ] && echo "docker.io/${DOCKERHUB_NAMESPACE,,}/$IMAGE_NAME"
+            [ "$QUAY_ENABLED" = "true" ] && echo "quay.io/${QUAY_NAMESPACE,,}/$IMAGE_NAME"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.images.outputs.list }}
+          tags: |
+            type=raw,value=${{ env.VERSION }}
+            type=raw,value=${{ env.MINOR }},enable=${{ env.LATEST }}
+            type=raw,value=latest,enable=${{ env.LATEST }}
+          flavor: latest=false
+          labels: |
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: Build and push (multi-arch)
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ env.PLATFORMS }}
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            FINERACT_VERSION=${{ env.VERSION }}
+            JAVA_VERSION=${{ steps.release.outputs.java }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha,scope=fineract
+          cache-to: type=gha,mode=max,scope=fineract
+
+      - name: Install cosign
+        if: env.PUBLISH == 'true'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign images (keyless)
+        if: env.PUBLISH == 'true'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          IMAGES: ${{ steps.images.outputs.list }}
+        run: |
+          for img in $IMAGES; do
+            cosign sign --yes "${img}@${DIGEST}"
+          done
+
+      - name: Sync Docker Hub description
+        if: env.PUBLISH == 'true' && env.DOCKERHUB_ENABLED == 'true' && github.ref == 'refs/heads/main' && env.LATEST == 'true'
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ vars.DOCKERHUB_NAMESPACE || github.repository_owner }}/${{ env.IMAGE_NAME }}
+          short-description: "Apache Fineract core banking: versioned releases, signed, multi-arch, non-root, MariaDB driver"
+          readme-filepath: ./README.md
