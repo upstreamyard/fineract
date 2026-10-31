@@ -1,0 +1,58 @@
+# Apache Fineract with MariaDB 11.8 (the image includes the MariaDB JDBC driver).
+# Start: docker compose up -d   (the first start runs all database migrations: 1-2 minutes)
+# API:   https://localhost:8443/fineract-provider/api/v1 (self-signed certificate)
+#        user "mifos", password = FINERACT_ADMIN_PASSWORD, header "Fineract-Platform-TenantId: default"
+# Change every "change-me" value first. The database password appears three times.
+services:
+  fineract:
+    image: upstreamyard/fineract:1.16
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      FINERACT_HIKARI_DRIVER_SOURCE_CLASS_NAME: org.mariadb.jdbc.Driver
+      FINERACT_HIKARI_JDBC_URL: jdbc:mariadb://mariadb:3306/fineract_tenants
+      FINERACT_HIKARI_USERNAME: fineract
+      FINERACT_HIKARI_PASSWORD: change-me-db
+      FINERACT_DEFAULT_TENANTDB_HOSTNAME: mariadb
+      FINERACT_DEFAULT_TENANTDB_PORT: "3306"
+      FINERACT_DEFAULT_TENANTDB_UID: fineract
+      FINERACT_DEFAULT_TENANTDB_PWD: change-me-db
+      FINERACT_DEFAULT_TENANTDB_MASTER_PASSWORD: change-me-master   # set once, never change
+      FINERACT_DEFAULT_TENANTDB_TIMEZONE: UTC
+      FINERACT_ADMIN_PASSWORD: Change-me-4dm1n!
+    ports:
+      - "8443:8443"
+    volumes:
+      - fineract_data:/var/lib/fineract
+
+  mariadb:
+    image: mariadb:11.8
+    restart: unless-stopped
+    # Fineract's own MariaDB setup: utf8mb4 and snapshot isolation off.
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --innodb-snapshot-isolation=OFF
+    environment:
+      MARIADB_ROOT_PASSWORD: change-me-root
+    configs:
+      - source: fineract-databases
+        target: /docker-entrypoint-initdb.d/01-fineract.sql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      retries: 30
+    volumes:
+      - mariadb_data:/var/lib/mysql
+
+configs:
+  fineract-databases:
+    content: |
+      CREATE DATABASE fineract_tenants;
+      CREATE DATABASE fineract_default;
+      CREATE USER 'fineract'@'%' IDENTIFIED BY 'change-me-db';
+      GRANT ALL ON fineract_tenants.* TO 'fineract'@'%';
+      GRANT ALL ON fineract_default.* TO 'fineract'@'%';
+
+volumes:
+  fineract_data:
+  mariadb_data:

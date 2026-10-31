@@ -1,0 +1,7 @@
+.git
+.github
+examples
+*.md
+llms.txt
+docker-compose.yml
+scripts

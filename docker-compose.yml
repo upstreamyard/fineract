@@ -1,0 +1,57 @@
+# Apache Fineract with PostgreSQL 18.
+# Start: docker compose up -d   (the first start runs all database migrations: about a minute)
+# API:   https://localhost:8443/fineract-provider/api/v1 (self-signed certificate)
+#        user "mifos", password = FINERACT_ADMIN_PASSWORD, header "Fineract-Platform-TenantId: default"
+# Change every "change-me" value first. The database password appears three times.
+services:
+  fineract:
+    image: upstreamyard/fineract:1.16
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      FINERACT_HIKARI_JDBC_URL: jdbc:postgresql://postgres:5432/fineract_tenants
+      FINERACT_HIKARI_USERNAME: fineract
+      FINERACT_HIKARI_PASSWORD: change-me-db
+      FINERACT_DEFAULT_TENANTDB_HOSTNAME: postgres
+      FINERACT_DEFAULT_TENANTDB_UID: fineract
+      FINERACT_DEFAULT_TENANTDB_PWD: change-me-db
+      # Encrypts the tenant's database password. Set it before the first start, never change it.
+      FINERACT_DEFAULT_TENANTDB_MASTER_PASSWORD: change-me-master
+      # Time zone of the default tenant, stored on the first start (Fineract's default: Asia/Kolkata).
+      FINERACT_DEFAULT_TENANTDB_TIMEZONE: UTC
+      # Replaces mifos/password on the first start. 12-50 characters with upper and lower case,
+      # a digit and a special character, no spaces, no character twice in a row.
+      FINERACT_ADMIN_PASSWORD: Change-me-4dm1n!
+    ports:
+      - "8443:8443"
+    volumes:
+      - fineract_data:/var/lib/fineract   # uploaded documents and images
+
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: change-me-postgres
+    configs:
+      - source: fineract-databases
+        target: /docker-entrypoint-initdb.d/01-fineract.sql
+    healthcheck:
+      # TCP, so it only succeeds once the init script has run.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "fineract", "-d", "fineract_default"]
+      interval: 5s
+      retries: 30
+    volumes:
+      - postgres_data:/var/lib/postgresql
+
+configs:
+  fineract-databases:
+    content: |
+      CREATE USER fineract WITH PASSWORD 'change-me-db';
+      CREATE DATABASE fineract_tenants OWNER fineract;
+      CREATE DATABASE fineract_default OWNER fineract;
+
+volumes:
+  fineract_data:
+  postgres_data:
