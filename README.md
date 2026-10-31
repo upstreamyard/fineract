@@ -28,7 +28,7 @@ Compared with Fineract's own `apache/fineract` image. We tested its `latest` tag
 | Version tags | none since `1.12.1` (Sept 2025); `latest` is `1.17.0-SNAPSHOT`, the development branch | every release: `1.16.1`, `1.16`, `latest` |
 | Built from | the development branch, by Fineract's CI | the signed Apache binary release (SHA-512 and GPG checked) |
 | Login `mifos` / `password` | stays until you change it | replaced on the first start with `FINERACT_ADMIN_PASSWORD` |
-| HTTPS certificate | built-in keystore whose private key is public (Fineract's source code) | generated per container; or your own keystore |
+| HTTPS certificate | built-in keystore whose private key is public (Fineract's source code) | generated per container; or your PEM files (e.g. cert-manager), reloaded on renewal; or your own keystore |
 | Document and image uploads | fail with HTTP 500 (`ContentStoreException: /.fineract`) | stored in `/var/lib/fineract` (volume) |
 | JVM options (`-Duser.timezone=UTC`, …) | passed after the main class, so ignored | applied |
 | Heap | Java default: 25% of the memory limit | 60% of the memory limit |
@@ -104,6 +104,8 @@ The most important settings. All other Fineract settings work as documented in F
 Every `FINERACT_*` variable also has a `_FILE` variant that reads the value from a file, e.g. `FINERACT_HIKARI_PASSWORD_FILE=/run/secrets/db-password` for Docker or Kubernetes secrets.
 
 Set a memory limit of at least 2 GiB: right after the start Fineract uses about 1.5 GiB.
+
+Each instance holds two database connection pools: the tenant store (up to 10 connections) and the tenant database (up to 40, a default stored when the tenant is created). Idle, an instance keeps 8 connections open. Cap the tenant pool with `FINERACT_CONFIG_MAX_POOL_SIZE` and size the database's `max_connections` for all instances.
 
 ### Databases
 
