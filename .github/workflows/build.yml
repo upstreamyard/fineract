@@ -94,7 +94,7 @@ jobs:
           echo "java=$(cat upstream/JAVA_VERSION)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       # ---------- Smoke test (amd64) before anything is published ----------
       - name: Build test image
