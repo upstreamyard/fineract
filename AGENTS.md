@@ -17,7 +17,7 @@ Instructions for AI agents and coding assistants working with this repository or
 | Databases | PostgreSQL (driver in Fineract), MariaDB (driver added in `/app/lib`), MySQL (driver not included; mount it in `/app/plugins`) |
 | Data | `/var/lib/fineract`: uploaded documents and images |
 | User | non-root, UID/GID `10001`; read-only root filesystem works with a writable `/tmp` |
-| Config | env vars `FINERACT_*` (Fineract's own), each with a `_FILE` variant; `FINERACT_ADMIN_PASSWORD`, `JAVA_OPTS_MEMORY`, `JAVA_OPTS` (this image) |
+| Config | env vars `FINERACT_*` (Fineract's own), each with a `_FILE` variant; `FINERACT_ADMIN_PASSWORD`, `FINERACT_SERVER_SSL_CERTIFICATE`, `FINERACT_SERVER_SSL_CERTIFICATE_PRIVATE_KEY`, `JAVA_OPTS_MEMORY`, `JAVA_OPTS` (this image) |
 | Fineract project | https://github.com/apache/fineract (Apache-2.0) |
 
 ## Deploying the image
@@ -29,7 +29,7 @@ Rules that avoid the common failures:
 - **Tenant time zone:** `FINERACT_DEFAULT_TENANTDB_TIMEZONE` is stored on the first start; Fineract's default is `Asia/Kolkata`.
 - **Admin password:** set `FINERACT_ADMIN_PASSWORD` (12–50 characters, upper and lower case, digit, special character, no spaces, no character twice in a row). The container replaces `mifos`/`password` once Fineract is ready, only while the password is still the default, only on write instances. Later changes go through Fineract's API.
 - **MariaDB:** `FINERACT_HIKARI_DRIVER_SOURCE_CLASS_NAME=org.mariadb.jdbc.Driver`, `jdbc:mariadb://` URL, `FINERACT_DEFAULT_TENANTDB_PORT=3306`; start MariaDB with `--character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --innodb-snapshot-isolation=OFF`.
-- **TLS:** for production, terminate TLS in front and set `FINERACT_SERVER_SSL_ENABLED=false` (port becomes 8080), or mount a keystore and set `FINERACT_SERVER_SSL_KEY_STORE` and `_PASSWORD`. `FINERACT_SERVER_SSL_PROTOCOLS` and `_CIPHERS` are ignored by Fineract 1.16.1.
+- **TLS:** for production, mount PEM files (e.g. a cert-manager TLS Secret) and set `FINERACT_SERVER_SSL_CERTIFICATE` and `FINERACT_SERVER_SSL_CERTIFICATE_PRIVATE_KEY` (reloaded on change, no restart), or mount a keystore and set `FINERACT_SERVER_SSL_KEY_STORE` and `_PASSWORD`, or terminate TLS in front and set `FINERACT_SERVER_SSL_ENABLED=false` (port becomes 8080). `FINERACT_SERVER_SSL_PROTOCOLS` and `_CIPHERS` are ignored by Fineract 1.16.1.
 - **Several instances:** run migrations once with `SPRING_PROFILES_ACTIVE=liquibase-only` (exits 0), then servers with `FINERACT_LIQUIBASE_ENABLED=false`. Instance types use `FINERACT_MODE_READ_ENABLED`, `FINERACT_MODE_WRITE_ENABLED`, `FINERACT_MODE_BATCH_MANAGER_ENABLED`, `FINERACT_MODE_BATCH_WORKER_ENABLED` (not the `FINERACT_READ_MODE_ENABLED` names in Fineract's docs). Keep `FINERACT_NODE_ID=1` on the instance that runs scheduled jobs. Documents must be on shared storage across write instances.
 - **Probes:** a first start on an empty database takes 30–150 s; use a startup probe with a few minutes of budget. With HTTPS, Kubernetes probes need `scheme: HTTPS`.
 - **Memory:** limit at least 2 GiB; the heap is 60% of the limit (`JAVA_OPTS_MEMORY`). `JAVA_OPTS` is appended to our Java options.
@@ -55,7 +55,7 @@ Layout:
 
 - `Dockerfile`: packages the `fineract-provider` jar from the official binary release, which `scripts/fetch-release.sh` downloads, verifies (SHA-512 and GPG) and unpacks into `./upstream/` (git-ignored), plus the MariaDB driver pinned by version and SHA-256
 - `scripts/fetch-release.sh`: also writes `upstream/JAVA_VERSION` (from the class file version), which CI passes as `JAVA_VERSION`
-- `docker-entrypoint.sh`: `_FILE` variables, TLS certificate generation, port default, Java options, background job that replaces the default `mifos` password
+- `docker-entrypoint.sh`: `_FILE` variables, PEM certificates through a reloading Spring SSL bundle, TLS certificate generation, port default, Java options, background job that replaces the default `mifos` password
 - `healthcheck`: curl on the readiness endpoint with the same port and scheme rules as the entrypoint
 - `scripts/smoke-test.sh`: the test CI runs before publishing; run it locally too
 - `.github/workflows/build.yml`: builds the release listed on Apache's download server, smoke-tests, pushes multi-arch, signs and syncs the Docker Hub README

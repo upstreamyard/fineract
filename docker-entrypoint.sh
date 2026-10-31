@@ -1,9 +1,10 @@
 #!/bin/sh
 # Entrypoint of the upstreamyard Apache Fineract image.
 #  1. Reads FINERACT_*_FILE variables (e.g. FINERACT_HIKARI_PASSWORD_FILE) into FINERACT_*.
-#  2. HTTPS (Fineract's default): without your own keystore, generates a self-signed
-#     certificate for this container instead of using the key that ships inside Fineract
-#     (its private key is public). HTTP on 8080 when FINERACT_SERVER_SSL_ENABLED=false.
+#  2. HTTPS (Fineract's default): PEM files from FINERACT_SERVER_SSL_CERTIFICATE(_PRIVATE_KEY),
+#     reloaded on change, or your own keystore, or else a self-signed certificate generated
+#     for this container instead of the key that ships inside Fineract (its private key is
+#     public). HTTP on 8080 when FINERACT_SERVER_SSL_ENABLED=false.
 #  3. Starts Fineract with our Java options; jars in /app/lib and /app/plugins are loaded.
 #  4. On write instances, replaces the default password of user "mifos" with
 #     FINERACT_ADMIN_PASSWORD once Fineract is ready (only while it is still "password").
@@ -40,7 +41,18 @@ if [ "$(lower "${FINERACT_SERVER_SSL_ENABLED:-true}")" = false ]; then
 else
   export FINERACT_SERVER_PORT="${FINERACT_SERVER_PORT:-8443}"
   scheme=https
-  if [ -z "${FINERACT_SERVER_SSL_KEY_STORE:-}" ] && [ "$liquibase_only" = false ]; then
+  if [ -n "${FINERACT_SERVER_SSL_CERTIFICATE:-}" ]; then
+    # PEM files, e.g. a Kubernetes TLS Secret from cert-manager: served through a Spring SSL
+    # bundle that reloads the certificate when the files change (no restart on renewal).
+    [ -n "${FINERACT_SERVER_SSL_CERTIFICATE_PRIVATE_KEY:-}" ] \
+      || { log "FINERACT_SERVER_SSL_CERTIFICATE needs FINERACT_SERVER_SSL_CERTIFICATE_PRIVATE_KEY"; exit 1; }
+    export SERVER_SSL_BUNDLE=fineract
+    export SPRING_SSL_BUNDLE_PEM_FINERACT_KEYSTORE_CERTIFICATE="$FINERACT_SERVER_SSL_CERTIFICATE"
+    export SPRING_SSL_BUNDLE_PEM_FINERACT_KEYSTORE_PRIVATEKEY="$FINERACT_SERVER_SSL_CERTIFICATE_PRIVATE_KEY"
+    export SPRING_SSL_BUNDLE_PEM_FINERACT_RELOADONUPDATE=true
+    export FINERACT_SERVER_SSL_KEY_STORE="" FINERACT_SERVER_SSL_KEY_STORE_PASSWORD=""
+    log "HTTPS on port $FINERACT_SERVER_PORT with the certificate in $FINERACT_SERVER_SSL_CERTIFICATE (reloaded when it changes)"
+  elif [ -z "${FINERACT_SERVER_SSL_KEY_STORE:-}" ] && [ "$liquibase_only" = false ]; then
     tls_dir=$(mktemp -d /tmp/fineract-tls.XXXXXX)
     store_pw=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
     host=$(hostname)

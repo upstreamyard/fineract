@@ -90,6 +90,7 @@ The most important settings. All other Fineract settings work as documented in F
 | `FINERACT_ADMIN_PASSWORD` | – | Replaces the password of user `mifos` once Fineract is ready, but only while it is still `password` (write instances only). Must meet Fineract's password policy: 12–50 characters with upper and lower case, a digit and a special character, no spaces, no character twice in a row |
 | `FINERACT_SERVER_SSL_ENABLED` | `true` | `false`: plain HTTP, e.g. behind a TLS-terminating proxy |
 | `FINERACT_SERVER_PORT` | `8443`, or `8080` without TLS | Listening port |
+| `FINERACT_SERVER_SSL_CERTIFICATE`, `_CERTIFICATE_PRIVATE_KEY` | – | PEM certificate and key files, e.g. from a Kubernetes TLS Secret. Reloaded when the files change (this image) |
 | `FINERACT_SERVER_SSL_KEY_STORE`, `_PASSWORD` | generated | Your own keystore (PKCS12 or JKS), e.g. `/etc/fineract/tls/keystore.p12` |
 | `FINERACT_MODE_READ_ENABLED`, `_WRITE_ENABLED`, `_BATCH_MANAGER_ENABLED`, `_BATCH_WORKER_ENABLED` | `true` | Instance type, see [Scaling](#scaling-and-high-availability) |
 | `FINERACT_LIQUIBASE_ENABLED` | `true` | Database migrations at start |
@@ -116,8 +117,9 @@ Fineract needs two databases before its first start: the tenant store (`fineract
 
 Fineract serves HTTPS on port 8443 by default. Its built-in keystore is the same for every installation and its private key is public, so this image generates a self-signed certificate for each container at start instead (EC P-256, valid for `localhost`, `127.0.0.1` and the container hostname). Clients still have to accept a self-signed certificate. For production, either:
 
-- terminate TLS in front of Fineract (load balancer, ingress) and set `FINERACT_SERVER_SSL_ENABLED=false`; or
-- mount your own keystore and set `FINERACT_SERVER_SSL_KEY_STORE` and `FINERACT_SERVER_SSL_KEY_STORE_PASSWORD`.
+- mount a certificate and key in PEM format, e.g. a Kubernetes TLS Secret from cert-manager, and set `FINERACT_SERVER_SSL_CERTIFICATE` and `FINERACT_SERVER_SSL_CERTIFICATE_PRIVATE_KEY` to the two file paths. Fineract picks up a renewed certificate within seconds, without a restart (tested with RSA keys in PKCS#1 format, cert-manager's default);
+- mount your own keystore and set `FINERACT_SERVER_SSL_KEY_STORE` and `FINERACT_SERVER_SSL_KEY_STORE_PASSWORD`; or
+- terminate TLS in front of Fineract (load balancer, ingress) and set `FINERACT_SERVER_SSL_ENABLED=false`.
 
 Fineract's documentation lists `FINERACT_SERVER_SSL_PROTOCOLS` and `FINERACT_SERVER_SSL_CIPHERS`, but Fineract 1.16.1 ignores them.
 
@@ -222,7 +224,7 @@ docker buildx imagetools inspect upstreamyard/fineract:1.16 --format '{{ json .S
   - the admin password and the generated certificate;
   - a document upload that survives a restart, Prometheus metrics and a clean stop;
   - a `liquibase-only` run, then HTTP, `_FILE` secrets and a read-only root filesystem;
-  - read and batch instances;
+  - read and batch instances, and a PEM certificate that is replaced while Fineract runs;
   - that a changed master password is refused.
 
 ## Licences

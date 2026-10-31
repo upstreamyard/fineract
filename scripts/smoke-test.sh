@@ -5,7 +5,8 @@
 #     Prometheus metrics, clean stop, restart with the document still there.
 #  2. Kubernetes style: a liquibase-only run, then a server with migrations off, HTTP on
 #     8080, *_FILE secrets and a read-only root filesystem.
-#  3. Instance types on the database of step 1: a read instance and a batch instance.
+#  3. Instance types on the database of step 1: a read instance (with a PEM certificate that
+#     is replaced while it runs) and a batch instance.
 #  4. MariaDB with the bundled driver.
 #  5. A changed tenant master password is refused.
 # Usage: scripts/smoke-test.sh <image>   (cleans up its containers, volumes and network;
@@ -82,7 +83,16 @@ GRANT ALL ON fineract_tenants.* TO 'fineract'@'%';
 GRANT ALL ON fineract_default.* TO 'fineract'@'%';
 EOF
 printf '%s' "$DB_PW" > "$WORK/db-password"
-chmod 644 "$WORK"/*
+# PEM certificate like a cert-manager TLS Secret (RSA key in PKCS#1 format).
+pem_cert() { # cn
+  openssl genrsa -traditional -out "$WORK/tls/new.key" 2048 2>/dev/null
+  openssl req -new -x509 -key "$WORK/tls/new.key" -out "$WORK/tls/new.crt" -days 2 -subj "/CN=$1" 2>/dev/null
+  chmod 644 "$WORK/tls/new.key" "$WORK/tls/new.crt"
+  mv "$WORK/tls/new.key" "$WORK/tls/tls.key"; mv "$WORK/tls/new.crt" "$WORK/tls/tls.crt"
+}
+mkdir "$WORK/tls"
+pem_cert pem-one.smoke
+chmod -R a+rX "$WORK"
 printf '%%PDF-1.4\n%% smoke test\n' > "$WORK/contract.pdf"
 
 docker run -d --name "$PREFIX-pg" --network "$NET" -e POSTGRES_PASSWORD=root-pw \
@@ -159,6 +169,8 @@ echo "HTTP on 8080 with *_FILE secrets and a read-only root filesystem ok"
 
 echo "== 3. Instance types (read, batch) and 4. MariaDB"
 docker run -d --name "$PREFIX-read" --network "$NET" "${pg_env[@]}" -e FINERACT_LIQUIBASE_ENABLED=false -e FINERACT_NODE_ID=2 \
+  -v "$WORK/tls:/etc/fineract/tls:ro" -e FINERACT_SERVER_SSL_CERTIFICATE=/etc/fineract/tls/tls.crt \
+  -e FINERACT_SERVER_SSL_CERTIFICATE_PRIVATE_KEY=/etc/fineract/tls/tls.key \
   -e FINERACT_MODE_WRITE_ENABLED=false -e FINERACT_MODE_BATCH_MANAGER_ENABLED=false -e FINERACT_MODE_BATCH_WORKER_ENABLED=false "$IMAGE" >/dev/null
 docker run -d --name "$PREFIX-batch" --network "$NET" "${pg_env[@]}" -e FINERACT_LIQUIBASE_ENABLED=false -e FINERACT_NODE_ID=3 \
   -e FINERACT_MODE_READ_ENABLED=false -e FINERACT_MODE_WRITE_ENABLED=false "$IMAGE" >/dev/null
@@ -174,6 +186,12 @@ wait_healthy "$PREFIX-read"
 [ "$(api "$PREFIX-read" GET /api/v1/offices "mifos:$ADMIN_PW")" = 200 ] || fail "read instance does not serve GET"
 [ "$(api "$PREFIX-read" POST /api/v1/clients "mifos:$ADMIN_PW" '{"officeId":1}')" = 405 ] || fail "read instance accepts writes"
 echo "Read instance: GET 200, POST 405"
+served_cn() { docker exec "$1" sh -c 'curl -vsk -o /dev/null https://127.0.0.1:8443/ 2>&1 | grep "subject:"' || true; }
+grep -q "CN=pem-one.smoke" <<< "$(served_cn "$PREFIX-read")" || fail "PEM certificate not served: $(served_cn "$PREFIX-read")"
+pem_cert pem-two.smoke
+for _ in $(seq 1 30); do grep -q "CN=pem-two.smoke" <<< "$(served_cn "$PREFIX-read")" && break; sleep 2; done
+grep -q "CN=pem-two.smoke" <<< "$(served_cn "$PREFIX-read")" || fail "replaced PEM certificate not reloaded"
+echo "PEM certificate served, and the replaced one reloaded without a restart"
 wait_healthy "$PREFIX-batch"
 [ "$(api "$PREFIX-batch" GET /api/v1/jobs "mifos:$ADMIN_PW")" = 200 ] || fail "batch instance does not serve the jobs API"
 [ "$(api "$PREFIX-batch" GET /api/v1/offices "mifos:$ADMIN_PW")" = 405 ] || fail "batch instance serves read APIs"
