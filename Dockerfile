@@ -11,7 +11,7 @@ ARG JAVA_VERSION=25
 # Prepare: release files, extras, licences
 # -----------------------------
 # Only handles platform-independent files (jars, texts), so it runs natively.
-FROM --platform=$BUILDPLATFORM alpine:3.22 AS prepare
+FROM --platform=$BUILDPLATFORM alpine:3.24 AS prepare
 
 # MariaDB Connector/J (LGPL-2.1-or-later), from Maven Central, and its licence text.
 ARG MARIADB_JDBC_VERSION=3.5.11
