@@ -2,7 +2,7 @@
 
 # Fineract Docker image (Apache Fineract 1.16)
 
-> **Support:** For help with setup, production issues, or hardened and custom images, email [upstreamyard@proton.me](mailto:upstreamyard@proton.me).
+> Have any questions, feedback or need help (e.g. setup, hardened images, etc.)? Reach out to [contact@upstreamyard.com](mailto:contact@upstreamyard.com)
 
 Production-ready, multi-arch (`amd64`, `arm64`) and signed **Apache Fineract Docker image**, with a **version tag for every Apache Fineract release**, built from the signed Apache binary release. Fineract's own image has had no version tags since 1.12.1, and its `latest` tag is an unreleased development build. This image is **secure by default**: `FINERACT_ADMIN_PASSWORD` replaces the default `mifos`/`password` login, every container gets its own TLS certificate instead of the public built-in one, and it runs as non-root with a healthcheck. **PostgreSQL and MariaDB** drivers are included, **document uploads work** and persist in a volume, and the image runs as read, write or batch instance for **high availability and scaling**. Use it with Docker Compose, or on Kubernetes with our **[Fineract Helm chart](https://github.com/upstreamyard/helm-charts/tree/main/charts/fineract)**.
 
